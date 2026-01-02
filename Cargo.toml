@@ -29,6 +29,7 @@ esp-idf-hal = "0.45"
 anyhow = "1.0"
 ssd1306 = "0.10"
 embedded-graphics = "0.8"
+chrono = "0.4.42"
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }

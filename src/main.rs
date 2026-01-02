@@ -1,19 +1,22 @@
+mod devices;
+
 use anyhow::Result;
-use embedded_graphics::{
-    mono_font::{MonoTextStyle, ascii::{FONT_6X10, FONT_8X13, FONT_9X15}},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    text::Text,
-};
 use esp_idf_hal::{
-    delay::TickType,
     i2c::{I2cConfig, I2cDriver},
-    sys::TickType_t,
     units::FromValueType,
 };
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use log::info;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+
+fn format_ms(ms: u128) -> String {
+    let total_centis = ms / 10; // 毫秒转成厘秒
+    let centis = (total_centis % 100) as u32; // 0-99
+    let total_secs = total_centis / 100;
+    let secs = (total_secs % 60) as u32; // 0-59
+    let mins = (total_secs / 60) as u32; // 分钟可继续滚动
+    format!("{:02}:{:02}.{:02}", mins, secs, centis)
+}
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise, some patches to
@@ -32,7 +35,7 @@ fn main() -> Result<()> {
         peripherals.i2c0,
         peripherals.pins.gpio9,
         peripherals.pins.gpio10,
-        &I2cConfig::new().baudrate(100000_u32.Hz().into()),
+        &I2cConfig::new().baudrate(100_u32.kHz().into()),
     )?;
 
     // info!("Starting I2C scan...");
@@ -58,23 +61,13 @@ fn main() -> Result<()> {
             .into_buffered_graphics_mode();
 
     display.init().map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    display.clear_buffer();
-
-    let style = MonoTextStyle::new(&FONT_8X13, BinaryColor::On);
-    Text::new("Hello OLED!", Point::new(0, 15), style)
-        .draw(&mut display)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    Text::new("addr=0x3C", Point::new(0, 30), style)
-        .draw(&mut display)
-        .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
-    // 关键：flush 才会真的显示
-    display.flush().map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
-    info!("display updated");
-
+    let mut oled = devices::oled::Oled::new(display);
+    info!("Running...");
     loop {
-        info!("Running...");
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        let elapsed_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis();
+        oled.show((&format_ms(elapsed_time), "addr=0x3C"))?;
+        std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
     }
 }
