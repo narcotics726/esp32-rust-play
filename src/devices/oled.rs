@@ -1,8 +1,5 @@
 use embedded_graphics::{
-    mono_font::{
-        ascii::FONT_8X13,
-        MonoTextStyle,
-    },
+    mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::BinaryColor,
     prelude::*,
     text::Text,
