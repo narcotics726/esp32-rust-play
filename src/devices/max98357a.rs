@@ -6,49 +6,67 @@ use esp_idf_hal::{
 
 pub struct Max98357a {
     i2s: I2sDriver<'static, I2sTx>,
+    is_playing: bool,
+    current_progress: u32,
 }
 
 impl Max98357a {
     pub fn new(i2s: I2sDriver<'static, I2sTx>) -> Self {
-        Max98357a { i2s }
+        Max98357a { i2s, is_playing: false, current_progress: 0 }
     }
 
     pub fn play_sample(
         &mut self,
-        _frequency: f32,
-        _duration_ms: u32,
+        frequency: f32,
+        duration_ms: u32,
     ) -> anyhow::Result<()> {
         let sample_rate_hz = 44_100_f32;
-        let freq_hz = 440.0_f32; // A4
-        let amp = 0.01_f32; // 0.0~1.0, 别太大避免爆音
+        let amp = 0.01_f32;
 
-        // 小 buffer：1024 个 sample -> 2048 bytes（i16）
-        let mut buf = [0i16; 1024];
+        // 每次写 256 帧 stereo：每帧 L+R 两个 i16
+        const FRAMES: usize = 256;
+        let mut buf = [0i16; FRAMES * 2]; // LRLR...
 
         let mut phase = 0.0_f32;
-        let phase_step = 2.0 * std::f32::consts::PI * freq_hz / sample_rate_hz;
+        let phase_step =
+            2.0 * std::f32::consts::PI * frequency / sample_rate_hz;
 
-        loop {
-            for s in buf.iter_mut() {
+        // 总共要播放多少帧（按“帧”算：一帧包含 L+R）
+        let total_frames = (sample_rate_hz as u32) * duration_ms / 1000;
+        let mut remaining = total_frames as usize;
+
+        while remaining > 0 {
+            let frames_now = remaining.min(FRAMES);
+
+            for i in 0..frames_now {
                 let v = (phase.sin() * amp * i16::MAX as f32) as i16;
-                *s = v;
+                // 左右声道都输出同样的波形（最简单）
+                buf[i * 2] = v; // L
+                buf[i * 2 + 1] = v; // R
+
                 phase += phase_step;
                 if phase > 2.0 * std::f32::consts::PI {
                     phase -= 2.0 * std::f32::consts::PI;
                 }
             }
 
-            // 把 i16 buffer 当作字节写入
             let bytes: &[u8] = unsafe {
                 core::slice::from_raw_parts(
                     buf.as_ptr() as *const u8,
-                    buf.len() * core::mem::size_of::<i16>(),
+                    frames_now * 2 * core::mem::size_of::<i16>(),
                 )
             };
 
+            // 用 write_all（如果有）更符合“把这块写完”
             self.i2s
                 .write(bytes, TickType_t::from(TickType::new_millis(1000)))?;
+
+            remaining -= frames_now;
+            // 一般不需要 sleep：write 本身会因为 DMA 缓冲而阻塞到合适速率
+            // 如果你发现 CPU 占用太高，可以 sleep 1ms
+            // std::thread::sleep(std::time::Duration::from_millis(1));
         }
+
         Ok(())
     }
 }

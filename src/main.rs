@@ -4,7 +4,6 @@ mod devices;
 use anyhow::Result;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use log::info;
-use ssd1306::prelude::*;
 
 fn format_ms(ms: u128) -> String {
     let total_centis = ms / 10; // 毫秒转成厘秒
@@ -54,17 +53,18 @@ fn main() -> Result<()> {
     // let mut oled = devices::oled::Oled::new(display);
     let mut board = board::Board::new();
     board.init(peripherals)?;
+    let mut audio = board.max98357a.take().unwrap();
+    let mut oled = board.oled.take().unwrap();
     info!("Running...");
-    board.max98357a.as_mut().unwrap().play_sample(440.0, 10000)?;
+    std::thread::spawn(move || {
+        let _ = audio.play_sample(440.0, 10000);
+    });
     loop {
         let elapsed_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
-        board
-            .oled
-            .as_mut()
-            .unwrap()
-            .show((&format_ms(elapsed_time), "addr=0x3C"))?;
-        std::thread::sleep(std::time::Duration::from_millis(1000 / 60));
+        // oled.clear();
+        oled.show((&format_ms(elapsed_time), "addr=0x3C"))?;
+        std::thread::sleep(std::time::Duration::from_millis(1000 / 30));
     }
 }
