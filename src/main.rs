@@ -54,7 +54,9 @@ fn main() -> Result<()> {
     let mut board = board::Board::new();
     board.init(peripherals)?;
     let mut audio = board.max98357a.take().unwrap();
+    let is_stop = audio.is_stop.clone();
     let mut oled = board.oled.take().unwrap();
+    let mut btn1 = board.btn1.take().unwrap();
     info!("Running...");
     std::thread::spawn(move || {
         let _ = audio.play_sample(440.0, 10000);
@@ -64,7 +66,19 @@ fn main() -> Result<()> {
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
         // oled.clear();
-        oled.show((&format_ms(elapsed_time), "addr=0x3C"))?;
+        if btn1.is_pressed() {
+            info!("Button 1 pressed!");
+            let current_is_stop =
+                is_stop.load(std::sync::atomic::Ordering::Relaxed);
+            oled.show((
+                "Button 1 pressed!",
+                current_is_stop.to_string().as_str(),
+            ))?;
+            is_stop
+                .store(!current_is_stop, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            oled.show((&format_ms(elapsed_time), "addr=0x3C"))?;
+        }
         std::thread::sleep(std::time::Duration::from_millis(1000 / 30));
     }
 }

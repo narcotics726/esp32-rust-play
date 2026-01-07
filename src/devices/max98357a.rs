@@ -1,3 +1,5 @@
+use std::sync::{atomic::AtomicBool, Arc};
+
 use esp_idf_hal::{
     delay::TickType,
     i2s::{I2sDriver, I2sTx},
@@ -6,13 +8,12 @@ use esp_idf_hal::{
 
 pub struct Max98357a {
     i2s: I2sDriver<'static, I2sTx>,
-    is_playing: bool,
-    current_progress: u32,
+    pub is_stop: Arc<AtomicBool>,
 }
 
 impl Max98357a {
     pub fn new(i2s: I2sDriver<'static, I2sTx>) -> Self {
-        Max98357a { i2s, is_playing: false, current_progress: 0 }
+        Max98357a { i2s, is_stop: Arc::new(AtomicBool::new(false)) }
     }
 
     pub fn play_sample(
@@ -36,7 +37,29 @@ impl Max98357a {
         let mut remaining = total_frames as usize;
 
         while remaining > 0 {
+            if self.is_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                // 写一块静音，而不是 sleep
+                for i in 0..FRAMES {
+                    buf[i * 2] = 0;
+                    buf[i * 2 + 1] = 0;
+                }
+                let bytes: &[u8] = unsafe {
+                    core::slice::from_raw_parts(
+                        buf.as_ptr() as *const u8,
+                        buf.len() * 2,
+                    )
+                };
+                self.i2s.write(
+                    bytes,
+                    TickType_t::from(TickType::new_millis(1000)),
+                )?;
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                continue;
+            }
             let frames_now = remaining.min(FRAMES);
+            if remaining - frames_now <= 0 {
+                remaining += total_frames as usize; // loop
+            }
 
             for i in 0..frames_now {
                 let v = (phase.sin() * amp * i16::MAX as f32) as i16;

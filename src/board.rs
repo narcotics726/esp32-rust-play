@@ -1,7 +1,8 @@
 use anyhow::Result;
 use esp_idf_hal::{
     gpio::{
-        AnyIOPin, Gpio10, Gpio11, Gpio12, Gpio4, Gpio5,
+        AnyIOPin, Gpio10, Gpio11, Gpio12, Gpio4, Gpio5, Gpio6, Gpio7, InputPin,
+        OutputPin, PinDriver, Pull,
     },
     i2c::{I2cConfig, I2cDriver, I2C0},
     i2s::{
@@ -11,7 +12,7 @@ use esp_idf_hal::{
     units::FromValueType,
 };
 
-use crate::devices::{max98357a::Max98357a, oled::Oled};
+use crate::devices::{button::Button, max98357a::Max98357a, oled::Oled};
 use esp_idf_svc::hal::prelude::Peripherals;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 
@@ -19,11 +20,13 @@ pub struct Board {
     i2c: Option<I2cDriver<'static>>,
     pub oled: Option<Oled>,
     pub max98357a: Option<Max98357a>,
+    pub btn1: Option<Button<Gpio6>>,
+    pub btn2: Option<Button<Gpio7>>,
 }
 
 impl Board {
     pub fn new() -> Self {
-        Board { oled: None, i2c: None, max98357a: None }
+        Board { oled: None, i2c: None, max98357a: None, btn1: None, btn2: None }
     }
 
     pub fn init(&mut self, peripherals: Peripherals) -> Result<()> {
@@ -39,6 +42,14 @@ impl Board {
         let gpio11 = peripherals.pins.gpio11;
         let gpio12 = peripherals.pins.gpio12;
         self.init_max98357a(i2s0, gpio10, gpio11, gpio12)?;
+
+        let Board { btn1, btn2, .. } = self;
+
+        let gpio6 = peripherals.pins.gpio6;
+        Self::init_button(gpio6, btn1)?;
+
+        let gpio7 = peripherals.pins.gpio7;
+        Self::init_button(gpio7, btn2)?;
         Ok(())
     }
 
@@ -99,6 +110,18 @@ impl Board {
             // 4) 启用 TX（开始产生 BCLK/WS）
             i2s.tx_enable()?;
             self.max98357a = Some(Max98357a::new(i2s));
+        }
+        Ok(())
+    }
+
+    fn init_button<P>(gpio: P, btnSlot: &mut Option<Button<P>>) -> Result<()>
+    where
+        P: InputPin + OutputPin,
+    {
+        let mut pin = PinDriver::input(gpio)?;
+        pin.set_pull(Pull::Up)?;
+        if btnSlot.is_none() {
+            *btnSlot = Some(Button::new(pin));
         }
         Ok(())
     }
