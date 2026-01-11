@@ -1,5 +1,6 @@
 use anyhow::Result;
 use esp_idf_hal::{
+    delay::TickType,
     gpio::{
         AnyIOPin, Gpio10, Gpio11, Gpio12, Gpio4, Gpio5, Gpio6, Gpio7, InputPin,
         OutputPin, PinDriver, Pull,
@@ -9,11 +10,18 @@ use esp_idf_hal::{
         config::{DataBitWidth, StdConfig},
         I2sDriver,
     },
+    sys::TickType_t,
     units::FromValueType,
 };
+use log::info;
 
-use crate::devices::{button::Button, max98357a::Max98357a, oled::Oled};
-use esp_idf_svc::hal::prelude::Peripherals;
+use crate::devices::{
+        button::Button,
+        max98357a::Max98357a,
+        oled::Oled,
+        wifi::Wifi,
+    };
+use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 
 pub struct Board {
@@ -22,14 +30,36 @@ pub struct Board {
     pub max98357a: Option<Max98357a>,
     pub btn1: Option<Button<Gpio6>>,
     pub btn2: Option<Button<Gpio7>>,
+    pub wifi: Option<Wifi>,
 }
 
 impl Board {
     pub fn new() -> Self {
-        Board { oled: None, i2c: None, max98357a: None, btn1: None, btn2: None }
+        Board {
+            oled: None,
+            i2c: None,
+            max98357a: None,
+            btn1: None,
+            btn2: None,
+            wifi: None,
+        }
     }
 
-    pub fn init(&mut self, peripherals: Peripherals) -> Result<()> {
+    fn init_wifi(
+        modem: esp_idf_hal::modem::Modem,
+        sysloop: EspSystemEventLoop,
+        wifi_slot: &mut Option<Wifi>,
+    ) {
+        *wifi_slot = Some(Wifi::new(modem, sysloop));
+    }
+
+    pub fn init(
+        &mut self,
+        peripherals: Peripherals,
+        sysloop: EspSystemEventLoop,
+    ) -> Result<()> {
+        let modem = peripherals.modem;
+
         let i2c0 = peripherals.i2c0;
         let gpio4 = peripherals.pins.gpio4;
         let gpio5 = peripherals.pins.gpio5;
@@ -43,13 +73,33 @@ impl Board {
         let gpio12 = peripherals.pins.gpio12;
         self.init_max98357a(i2s0, gpio10, gpio11, gpio12)?;
 
-        let Board { btn1, btn2, .. } = self;
+        let Board { btn1, btn2, wifi, .. } = self;
+
+        Self::init_wifi(modem, sysloop.clone(), wifi);
 
         let gpio6 = peripherals.pins.gpio6;
         Self::init_button(gpio6, btn1)?;
 
         let gpio7 = peripherals.pins.gpio7;
         Self::init_button(gpio7, btn2)?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn i2c_addr_scan(&mut self) -> Result<()> {
+        info!("Starting I2C scan...");
+
+        for addr in 0x03u8..=0x77u8 {
+            let res = self.i2c.take().unwrap().write(
+                addr,
+                &[],
+                TickType_t::from(TickType::new_millis(50)),
+            );
+            if res.is_ok() {
+                info!("Found device at 0x{:02X}", addr);
+            }
+        }
+
         Ok(())
     }
 
@@ -114,14 +164,14 @@ impl Board {
         Ok(())
     }
 
-    fn init_button<P>(gpio: P, btnSlot: &mut Option<Button<P>>) -> Result<()>
+    fn init_button<P>(gpio: P, btn_slot: &mut Option<Button<P>>) -> Result<()>
     where
         P: InputPin + OutputPin,
     {
         let mut pin = PinDriver::input(gpio)?;
         pin.set_pull(Pull::Up)?;
-        if btnSlot.is_none() {
-            *btnSlot = Some(Button::new(pin));
+        if btn_slot.is_none() {
+            *btn_slot = Some(Button::new(pin));
         }
         Ok(())
     }

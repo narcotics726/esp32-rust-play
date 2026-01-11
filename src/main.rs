@@ -1,9 +1,13 @@
 mod board;
+mod config;
 mod devices;
+mod services;
 
 use anyhow::Result;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use log::info;
+
+use crate::config::Config;
 
 fn format_ms(ms: u128) -> String {
     let total_centis = ms / 10; // 毫秒转成厘秒
@@ -22,37 +26,25 @@ fn main() -> Result<()> {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    log::info!("Hello, world!");
+    let config = Config::from_env();
+    log::info!(
+        "Config: wifi_ssid={}, wifi_psw={}",
+        config.wifi_ssid,
+        config.wifi_psw
+    );
 
     let peripherals = Peripherals::take().unwrap();
-    let _sysloop = EspSystemEventLoop::take()?;
+    let sysloop = EspSystemEventLoop::take()?;
 
-    // info!("Starting I2C scan...");
-
-    // for addr in 0x03u8..=0x77u8 {
-    //     // “敲门”方式：对这个地址做一次空写（写 0 字节）
-    //     // 有 ACK 就返回 Ok
-    //     let res =
-    //         i2c.write(addr, &[], TickType_t::from(TickType::new_millis(50)));
-    //     if res.is_ok() {
-    //         info!("Found device at 0x{:02X}", addr);
-    //     }
-    // }
-
-    info!("Scan done.");
-
-    // // SSD1306 I2C interface（地址扫描到的是 0x3C）
-    // let interface = I2CDisplayInterface::new_custom_address(i2c, 0x3C);
-
-    // // 0.91" 128x32；
-    // let mut display: Ssd1306<_, _, _> =
-    //     Ssd1306::new(interface, DisplaySize128x32, DisplayRotation::Rotate0)
-    //         .into_buffered_graphics_mode();
-
-    // display.init().map_err(|e| anyhow::anyhow!("{:?}", e))?;
-    // let mut oled = devices::oled::Oled::new(display);
     let mut board = board::Board::new();
-    board.init(peripherals)?;
+    board.init(peripherals, sysloop)?;
+
+    let mut wifi = board.wifi.take().unwrap();
+    let Config { wifi_ssid, wifi_psw } = config;
+    wifi.connect(wifi_ssid, wifi_psw)?;
+    let mut server = services::http_server::HTTPServer::new();
+    server.start()?;
+
     let mut audio = board.max98357a.take().unwrap();
     let is_stop = audio.is_stop.clone();
     let mut oled = board.oled.take().unwrap();
@@ -65,7 +57,7 @@ fn main() -> Result<()> {
         let elapsed_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis();
-        // oled.clear();
+
         if btn1.is_pressed() {
             info!("Button 1 pressed!");
             let current_is_stop =

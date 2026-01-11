@@ -57,7 +57,7 @@ impl Max98357a {
                 continue;
             }
             let frames_now = remaining.min(FRAMES);
-            if remaining - frames_now <= 0 {
+            if remaining - frames_now == 0 {
                 remaining += total_frames as usize; // loop
             }
 
