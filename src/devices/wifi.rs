@@ -2,9 +2,7 @@ use anyhow::{bail, Result};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::modem::Modem,
-    wifi::{
-        AuthMethod, ClientConfiguration, Configuration, EspWifi,
-    },
+    wifi::{AuthMethod, ClientConfiguration, Configuration, EspWifi},
 };
 use log::info;
 

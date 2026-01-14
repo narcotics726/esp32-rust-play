@@ -4,6 +4,7 @@ mod devices;
 mod services;
 
 use anyhow::Result;
+use crossbeam_channel::unbounded;
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use log::info;
 
@@ -36,13 +37,16 @@ fn main() -> Result<()> {
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
 
+    // create an unbounded channel
+    let (snd, rcv) = unbounded::<String>();
+
     let mut board = board::Board::new();
     board.init(peripherals, sysloop)?;
 
     let mut wifi = board.wifi.take().unwrap();
     let Config { wifi_ssid, wifi_psw } = config;
     wifi.connect(wifi_ssid, wifi_psw)?;
-    let mut server = services::http_server::HTTPServer::new();
+    let mut server = services::http_server::HTTPServer::new(snd);
     server.start()?;
 
     let mut audio = board.max98357a.take().unwrap();
@@ -53,6 +57,8 @@ fn main() -> Result<()> {
     std::thread::spawn(move || {
         let _ = audio.play_sample(440.0, 10000);
     });
+    let mut all_msgs = String::new();
+
     loop {
         let elapsed_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -60,6 +66,7 @@ fn main() -> Result<()> {
 
         if btn1.is_pressed() {
             info!("Button 1 pressed!");
+            all_msgs.clear();
             let current_is_stop =
                 is_stop.load(std::sync::atomic::Ordering::Relaxed);
             oled.show((
@@ -69,7 +76,10 @@ fn main() -> Result<()> {
             is_stop
                 .store(!current_is_stop, std::sync::atomic::Ordering::Relaxed);
         } else {
-            oled.show((&format_ms(elapsed_time), "addr=0x3C"))?;
+            while let Ok(msg) = rcv.try_recv() {
+                all_msgs = msg;
+            }
+            oled.show((&format_ms(elapsed_time), all_msgs.as_str()))?;
         }
         std::thread::sleep(std::time::Duration::from_millis(1000 / 30));
     }

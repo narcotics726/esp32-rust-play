@@ -16,11 +16,8 @@ use esp_idf_hal::{
 use log::info;
 
 use crate::devices::{
-        button::Button,
-        max98357a::Max98357a,
-        oled::Oled,
-        wifi::Wifi,
-    };
+    button::Button, max98357a::Max98357a, oled::Oled, wifi::Wifi,
+};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 
