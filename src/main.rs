@@ -4,7 +4,7 @@ mod devices;
 mod services;
 
 use anyhow::Result;
-use crossbeam_channel::unbounded;
+use crossbeam_channel::{bounded, unbounded};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, hal::prelude::Peripherals};
 use log::info;
 
@@ -39,6 +39,11 @@ fn main() -> Result<()> {
 
     // create an unbounded channel
     let (snd, rcv) = unbounded::<String>();
+    // assume we put 1024 frames per chunk
+    // each frame is 4 bytes (16-bit stereo)
+    // so each chunk is 4096 bytes (4 KB)
+    // 10 chunks in the bounded channel will be 40 KB buffer
+    let (snd_bounded, rcv_bounded) = bounded::<Vec<u8>>(10);
 
     let mut board = board::Board::new();
     board.init(peripherals, sysloop)?;
@@ -46,7 +51,7 @@ fn main() -> Result<()> {
     let mut wifi = board.wifi.take().unwrap();
     let Config { wifi_ssid, wifi_psw } = config;
     wifi.connect(wifi_ssid, wifi_psw)?;
-    let mut server = services::http_server::HTTPServer::new(snd);
+    let mut server = services::http_server::HTTPServer::new(snd, snd_bounded);
     server.start()?;
 
     let mut audio = board.max98357a.take().unwrap();
@@ -55,7 +60,13 @@ fn main() -> Result<()> {
     let mut btn1 = board.btn1.take().unwrap();
     info!("Running...");
     std::thread::spawn(move || {
-        let _ = audio.play_sample(440.0, 10000);
+        // should handle the case if no chunk is available
+        // maybe move the rcv_bounded into audio
+        while let Ok(chunk) = rcv_bounded.recv() {
+            if let Err(err) = audio.play(&chunk) {
+                log::error!("failed to play audio chunk: {err}");
+            }
+        }
     });
     let mut all_msgs = String::new();
 

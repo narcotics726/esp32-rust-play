@@ -92,4 +92,9 @@ impl Max98357a {
 
         Ok(())
     }
+
+    pub fn play(&mut self, chunk: &[u8]) -> anyhow::Result<()> {
+        self.i2s.write(chunk, TickType_t::from(TickType::new_millis(1000)))?;
+        Ok(())
+    }
 }

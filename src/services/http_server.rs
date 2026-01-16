@@ -6,13 +6,18 @@ use log::info;
 pub struct HTTPServer<'a> {
     pub server: EspHttpServer<'a>,
     snd: crossbeam_channel::Sender<String>,
+    snd_bounded: crossbeam_channel::Sender<Vec<u8>>,
 }
 
 impl HTTPServer<'_> {
-    pub fn new(snd: crossbeam_channel::Sender<String>) -> Self {
+    pub fn new(
+        snd: crossbeam_channel::Sender<String>,
+        snd_bounded: crossbeam_channel::Sender<Vec<u8>>,
+    ) -> Self {
         HTTPServer {
             server: EspHttpServer::new(&Configuration::default()).unwrap(),
             snd,
+            snd_bounded,
         }
     }
 
@@ -45,6 +50,30 @@ impl HTTPServer<'_> {
             response.write_all(b"Received")?;
             Ok(())
         })?;
+
+        let snd_bounded = self.snd_bounded.clone();
+        self.server.fn_handler(
+            "/audio",
+            Method::Post,
+            move |mut request| {
+                // read the body chunks by chunks
+                // send them to the bounded channel
+                const CHUNK_SIZE: usize = 4096;
+                let mut chunk = vec![0u8; CHUNK_SIZE];
+                loop {
+                    let n = request.read(&mut chunk)?;
+                    if n == 0 {
+                        break;
+                    }
+                    let data = chunk[..n].to_vec();
+                    if let Err(err) = snd_bounded.send(data) {
+                        log::error!("failed to send audio chunk: {err}");
+                        break;
+                    }
+                }
+                Ok(())
+            },
+        )?;
 
         info!("HTTP Server started on port 80");
         Ok(())
